@@ -1,0 +1,554 @@
+---
+title: "HW03"
+author: "Tamburini Grimaldi Mandara"
+date: "2023-02-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r, include=FALSE}
+library(Matrix)
+library(MASS)
+library(LaplacesDemon)
+library(stats)
+library(coin)
+library(ica)
+library(Rfast)
+library(tseries)
+
+load("hw3_data.RData")
+```
+
+# Essay on Friedman's process 
+
+
+We introduce Friedman's process useful for studying the activation states of the brain areas under analysis. The ultimate goal will be to classify brains in their entirety into "healthy" and "diseased".
+We want to provide statistical analysis that compares two or more sets of (brain) images
+with a goal of identifying differences between the populations represented by the
+subjects in the study. In this way we can extract a number of features for each subject in our study through the analysis of fMRIs for each ROI (see below).
+
+
+#### **Testing the equivalence of the distributions of two samples**
+
+*Goodness–of–fit testing* problem one is given a data set of $N$ measured observations  $\{x_i\}_{i=1}^{N}$ each of which is presumed to be randomly drawn independently from some probability distribution with density $p(x)$. The goal is to test the hypothesis that $p(x) = p_0(x)$.
+In a first attempt we could try to advance a two-sample goodness-of-fit test to assess the possibility of having two different distributions behind the two study populations (ASD and TD)  $\{x_i\}_{i=1}^{N}$ drawn from $p(x)$, and $\{z_i\}_{i=1}^{M}$ drawn from $q(z)$. The goal is to test the hypothesis that $p = q$.\
+The problem arises when each observation consists of many measured attributes  $xi = \{x_{i1}, x_{i2},\cdot\cdot\cdot, x_{in}\}$ (and $zi = \{z_{i1}, z_{i2}, \cdot\cdot\cdot, z_{in}\}$) and for large $n$, these tests **rapidly loose power** because all finite samples are sparse in high dimensional settings owing to the _curse–of–dimensionality_.
+
+
+#### **Friedman's process - Reducing the multivariate test to a univariate one**
+
+Then comes to the rescue the **Friedman's process** of reducing the multivariate two-sample testing problem to a univariate one through the use of a linear classifier. Friedman indeed shows that binary classification procedures can be used for two–sample testing:
+
+1. we have observations from two population samples of sizes N and M;
+2. those observations that originated from the first sample ($1 ≤ i ≤ N$) are assigned a response value $y_i = 1$ while those from the second sample ($N + 1 ≤ i ≤N + M$) are assigned $y_i = 0$;
+3. we can crate a predictor variable training data set $\{u_i\} _{i=1}^{N+M}$ by pooling the two samples $\rightarrow$
+$\{u_i\} _{i=1}^{N+M} = \{x_i\}_{i=1}^N ∪ \{z_i\}_{i=1}^M$
+4. A binary classification learning machine is applied to this training data to produce a scoring function $F(u)$;
+5. $\hat{t} = T(\{s_i\}_{i=1}^{N} , \{s_i\}_{i=N+1}^{N+M})$, where:
+
+    * $s_i = F(u_i)$ is the score assigned to the i-th observation by the classificator;
+    * $T$ is a UNIVARIATE TWO SAMPLE TEST for the equality of the denisties of the two samples (_Mann-Whitney_ or _Kolmogorov_).
+
+This is based on a presumption that if a classifier function can label new examples with better than random accuracy, the two populations are indeed different, and the classifier implicitly captures the differences between them. The training algorithm does not have to assume independence among features and therefore can discriminate between the two groups based on the entire ensemble of highly localized features.
+
+#### **Permutation test - Handling the distribution of $H_0$**
+
+Now we have one last problem to solve: when we try to evaluate the test statistic in step 5, we realize that, in order to test the “null” hypothesis $p = q$, it is necessary to know the distribution $H_0(t)$ of $T(\{s_i\}_{i=1}^N , \{s_i\} _{i=N+1}^{N+M})$ when the hypothesis is in fact true.
+For commonly applied univariate two–sample tests the corresponding null distributions are known and have been tabulated.
+These distributions are valid for the multivariate application provided that separate independent data sets are respectively used for training the learning machine
+and evaluating the scores . When the same data is used for both training and subsequent scoring, these univariate null distributions are not valid.
+
+A first attempt would see the use of techniques such as *k-fold cross validation* to get a good estimate of the accuracy of our classifier, but *Golland and Fischl* claim in their paper that the cross-validation trials are not independent and therefore do not allow variance estimation at all without extensive modeling of the dependence of errors in the cross-validation trials.
+Thus, neither simple testing nor cross-validation provides satisfactory estimates on how
+close the observed test error to the true expected error of the trained classifier (model generalization performance) and an overfitting issue is expected due to the high number of parameters (dependent on the high dimensionality of the feature space) compared to the number of examples available for training.
+
+We can handle this issue using the *permutation test* in association with the two-sample test previously selected:
+
+1. In two–sample testing a null distribution $H_0(t)$ is constructed by repeated random permutations of the responses $\{y_i\}$ over the predictors $\{u_i\}$;
+2. These data are then used to train the learning machine, score the observations, and compute the test statistic $\hat{t}$;
+3. This random permutation process is repeated $M$ times producing a set of test statistic values $\{t_l\}_{l=1}^M$;
+4. One can then reject the null hypothesis with significance level $\alpha$ if the value $\hat{t}$ computed form the original data $\{y_i, u_i\}$ is greater than or equal to the $1 - \alpha$ quantile of $\{t_l\}_{l=1}^M$.
+
+This is valid for any number of random permutations $P$ , but power increases with increasing $P$, reaching a diminishing return for large enough values.
+
+#### **Summing up**
+The permutation tests can be used to assess statistical significance of the classifier and its performance using the test error as a statistic that measures dissimilarity between two populations. Depending on the amount of the available data, the test error can be estimated on a large hold-out set or using cross-validation in every iteration of the permutation procedure. The null hypothesis assumes
+that the relationship between the data and the labels cannot be learned reliably
+by the family of classifiers used in the training step. The alternative hypothesis
+is that we can train a classifier with small expected error.
+We use the permutations to estimate the empirical cumulative distribution
+of the classifier error under the null hypothesis. For any value of the estimated
+error e, the appropriate p-value is $\hat{P}(e)$ (i.e., the probability of observing classification error lower than e). We can reject the null hypothesis and declare that
+the classifier learned the (probabilistic) relationship between the data and the
+labels with a risk of being wrong with probability of at most $\hat{P}(e)$.
+To underscore the point made in the previous section, the test uses
+
+#### **Choosing the classificator**
+We chose a simple linear classifier such as logistic because:
+
+1. the scientific literature reports a good affinity between it and the dimensional reduction technique we used ;
+2. we are more familiar with this family of models.
+
+We therefore preferred a GLM to, for example, a Support Vector Machine despite the fact that the latter is generally more effective, and we also avoided the use of Regularization given the low dimensionality we were able to achieve in preprocessing.
+
+#### **Choosing the non-parametric test**
+To better understand the difference between the parametric approach of the
+_t-test_ and the **permutation testing**, we observe that statistical significance does not
+provide an absolute measure of how well the observed differences between the sample groups will generalize, but it is rather contingent upon certain assumptions about the data distribution in each class $p(x|y)$ being true. The t-test
+makes assumptions about the distributions of samples from both classes, while the permutation test assumes that the data distribution is well represented by the sample data.
+
+**Mann-Whitney U test** is a non-parametric test, so it does not assume any assumptions related to the distribution of scores.\
+There are, however, some assumptions that are assumed:
+
+1. the sample drawn from the population is random;
+2. independence within the samples and mutual independence is assumed (that means that an observation is in one group or the other i.e. it cannot be in both);
+3. ordinal measurement scale is assumed.
+
+So we used this test (in a permuted, two sample version) to make some inference about the identity between the two distributions.
+	  
+# Exploratory Data Analysis
+
+Now before we dive into simulations and application of Friedman's process in combination with permutation testing let us proceed with An Exploratory Analysis of the data we have available. The goal at this stage is to check the various critical issues introduced earlier and identify possible solutions for reducing the complexity of our problem
+
+#### **Analysis of timeseries**
+
+A first step in properly selecting the features on which to build our data set is to analyze the stationarity of the timeseries related to the activation states of the various brain regions.
+**Stationarity** means that the statistical properties of a process generating a time series do not change over time.
+It is important to study for multiple reasons:
+1. stationary processes are easier to analyze;
+2. useful for trend estimation, forecasting and causal inference;
+3. grants more or less significance to certain statistical properties (e.g. mean , median, etc.).
+
+We follow the steps described in <a href="https://www.kdnuggets.com/2019/08/stationarity-time-series-data.html" > this article</a> to detect the stationarity of our timeseries. Thus we start with the bost basic technique: simply plot some sampled signal and visually determine whether they present some known property of non-stationarity data like increasing variance or a prominent trend.
+
+We then proceed by taking a sample from each of the two populations and plotting the activation status of some (nine) of their randomly chosen Roi
+
+```{r, out.width="100%", out.height="700px",echo=FALSE}
+set.seed(12334) 
+
+# one sample from asd population
+asd_one = asd_data[[sample(1:length(asd_data),1)]]
+# one sample from td population
+td_one = td_data[[sample(1:length(td_data),1)]]
+# sampling the ROIs to analyse for both the subjects
+n=9 # number of ROIs to sample
+rois = sample(1:116,n)
+
+# plotting the timeseries for 9 ROIs from 1 ASD person and 1 TD person
+par(mfrow=c(3,3))
+for( i in 1:9){
+  # retrieve the info from the dataframe
+  y_asd = asd_one[,rois[i]]
+  x_asd = seq(1,length(asd_one[,rois[i]]))
+  y_td = td_one[,rois[i]]
+  x_td = seq(1,length(td_one[,rois[i]]))
+  
+  # settings for plots
+  y_min  = min(y_asd,y_td) -6000
+  y_max = max(max(y_asd,y_td)) +6000
+  # plotting
+  plot(x_td, y_td,type='l', ylim=c(y_min,y_max),
+       ylab='Activation',xlab='Time',col='orange',
+       main=paste('ROI', rois[i]))
+  lines(x_asd,y_asd,type='l',ylim=c(y_min,y_max),
+        ylab=paste('ROI',rois[i],'Activation'),
+        xlab='Time',col='blue')
+  legend("topleft",
+         legend = c("TD" , "ASD"),
+         col = c("orange", "blue"), bty = "n",
+         border = "white", horiz = T, cex=.5, lwd=.2) 
+} 
+```
+
+We can thus see in comparison signals from two subjects from classes of different populations. We can rule out any trends and conspicuously non-stationary trends, but we find it difficult to understand from this initial analysis whether factors such as mean and variance are constant over time.
+
+As can be deduced from the following table we add that it is not at all informative to analyze the **seasonality** of signals since:
+
+1. we do not know the reference time metric;
+2. the timeseries of different subjects in general are defined along time intervals of different lengths.
+
+```{r,echo=FALSE}
+#We cannot report seasonality
+barplot(sort( table( sapply(asd_data, function(x) nrow(x)) ),
+              decreasing = T ), xlab="Length of timeseries",
+        ylab="Number of subjects", col="purple" ,
+        main="Data history for ASD people")
+```
+
+#### **Autocorrelation**
+
+For time-series, the autocorrelation is the correlation of that time series at two different points in time (also known as *lags*). We are measuring the time series against some lagged version of itself.\
+This computation allows us to gain some interesting insight into the stationarity of our series: if a decreasing trend of the autocorrelation function is identified (ACF converges as lag increases), the stationary aspect of the timeseries under analysis can be inferred.\
+In our case, it appears that the ACF converges to zero with an oscillatory trend for each analyzed series (for both healthy and unhealthy subjects).
+
+
+```{r, out.width="100%", out.height="700px",echo=FALSE}
+p.val.asd <- rep(NA,9)
+par(mfrow=c(3,3))
+for( i in 1:9){
+  ASD = asd_one[,rois[i]] 
+  acf(ASD,lag.max = 50, main="")
+  p.val.asd[i] <- adf.test(ASD)$p.value
+}
+mtext("Autocorrelation for a ASD sample",
+      side = 3,
+      line = - 2,
+      outer = TRUE)
+
+p.val.td <- rep(NA,9)
+par(mfrow=c(3,3))
+for( i in 1:9){
+  TD = td_one[,rois[i]]
+  acf(TD, lag.max = 50, main="")
+  p.val.td[i] <- adf.test(TD)$p.value
+}
+mtext("Autocorrelation for a TD sample",
+      side = 3,
+      line = - 2,
+      outer = TRUE)
+```
+
+#### **Agumented Dickey-Fuller test**
+
+For further confirmation, we performed a **Dickey-Fuller test** (ADF) for each timeseries in the previous code section. It tests the null hypothesis of the presence of a unit root in a sample of time series. The alternative hypothesis differs depending on the version of the test used, but it is usually stationarity or trend-stationarity. The p-value obtained in each iteration should be less than the significance level (say 0.05) in order to reject the null hypothesis.\
+In our case we always get a rejection with a significance level of 0.01!\
+Thus we can deduce with a **strong evidence** the **stationarity** of our data.
+
+```{r,echo=FALSE}
+perc <- (sum(p.val.td <= 0.01) + 
+           sum(p.val.asd <= 0.01))*100/18
+cat("The test rejects the null hypothesis in our sample", perc,"% of times")
+```
+
+# Building our data frame
+
+We decided to start with the construction of the data frame based on the available data and the previously reported EDA. We believe that, given the stationarity of our timeseries, it is relevant to exploit the information contained in the **averages** and **variances** of the signals. Moreover, the **autocorrelation** can be particularly indicative since it is not affected by the different length of the original data frames - in particular we are considering the autocorrelation value for a unitary lag. However, aware of the complexity of the problems we are going to address, we intend to first operate a **dimensionality reduction**. 
+
+#### **An introduction to Independent component analysis**
+
+ICA stands for Independent Components Analysis and is a linear dimension reduction method, which transforms the dataset into columns of independent components. ICA is an important tool in neuroimaging and assumes that each sample of data is a mixture of independent components and it aims to find these independent components. At the heart of ICA is "Independence".
+ICA approach to this problem is based on three assumptions. These are:
+
+*	Mixing process is linear.
+*	All source signals are independent of each other.
+*	All source signals have non-gaussian distribution.
+
+**Blind signal separation** is a class of explorative tools developed for the analysis of images and sound. They are called *blind* because they aim to recover source signals from mixtures with unknown mixing coefficients.\
+ICA is a family of methods for blind signal separation formed on the basis of assumed statistical independence of the source signals.\
+The diverse nature of the signals that contribute to fMRI recordings suggests that blind signal separation techniques could be used to isolate these different sources.\
+ICA is a promising exploratory technique that provides an alternative means to view data and to test assumptions about traditional hypothesis-driven methods.\
+Much technical effort has been put into tests to ensure robust inferences about brain activity. A significant virtue of ICA is that it allows the detection of unexpected responses to stimuli, including random responses or transiently task related responses. Furthermore, it is an effective tool for denoising fMRI, both with respect to random noise and confounding signals such as pulsation and breathing artifacts.\
+Such techniques will allow the full spatial-temporal aspects of brain activation to be better isolated from the complex mixtures of (often unknown) sources that make up the measured fMRI signal.\
+In short, also we have chosen this reduction technique because it can retain a good amount of information despite the high dimensional difference.
+
+We report the two links from which we deduced our choices regarding this passage:
+
+* <a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2925426/#FD1" > article 1</a>
+* <a href="http://www.newbi4fmri.com/tutorial-10-ica" > article 2</a>
+
+#### **Choosing the number of independent components**
+
+After a series of tests, we obtained the best results in terms of test power on the diversity of the two populations by choosing a number of independent components equal to nine. This was followed by the construction of an 18-column data frame having selected three features per signal as features.
+
+```{r, include=FALSE}
+# Functions --------------------------------------------------
+
+# function to vertically concatenate 2 dataframes
+concat.data <- function(df1, df2){
+  # concat df1 and df2
+  df <-  rbind(df1,df2)
+  nc <- ncol(df)-1
+  nr <- nrow(df)
+  df[is.na(df)] <- 0
+  rownames(df)=seq(1:nr) # rename rows
+  colnames(df)[1:nc]= 1:nc # rename columns
+  return(df)
+}
+
+# initialize a dataframe sampling from a parametrized
+# multivariate distribution
+sim.data <- function(mu, sigma, t){
+  # sampling from a multivariate normal
+  obs <- mvrnorm(n = 500, mu, sigma)
+  nr <- nrow(obs)
+  nc <- ncol(obs)
+  obs <- data.frame(obs)
+  obs$target <- rep(t,nr) # assigning the label
+  colnames(obs)[1:nc]= 1:nc
+  return(obs)
+}
+
+# evaluate the autocorrelation for a given timeseries
+acf_extraction <- function(i,x){
+  b <- x[[i]][1]
+  return(as.double(b$acf))
+}
+
+# extrapolate features
+init_data <- function(df){
+  mean_attr <- sapply(df,mean)
+  var_attr <- sapply(df,var)
+  autocor <- apply(df,2,acf,lag=1,pl=FALSE)
+  autocor_attr <- unlist(lapply(1:length(df),acf_extraction,autocor))
+  return(c(mean_attr,var_attr,autocor_attr))
+}
+
+# create the non-reduced dataframe
+create_dataframe <- function(df){
+  dataframe <- init_data(df[[1]])
+  for(i in 2:length(df)){
+    new_row <- init_data(df[[i]])
+    dataframe <- rbind(dataframe,new_row)
+  }
+  dataframe <- data.frame(dataframe)
+  return(dataframe)
+}
+
+# create the reduced dataframe
+ICA_create <- function(df,k){
+  ICA <- ica(df,k)[['Y']]
+  ICA_df <- data.frame(ICA)
+  colnames(ICA_df)[1:k]= 1:k # rename the columns
+  return(ICA_df)
+}
+
+# function for a single Friedman's process
+friedman <- function(n0, n1, alpha, df, log.model, N=0, sim=FALSE){
+
+  k <- length(df)-1 # number of input features
+  # if we are working with the simulation data 
+  if(sim){
+    index0 <- sample(1:N,n0,replace=TRUE)
+    index1 <- sample(1:N,n1,replace=TRUE)+N
+  }
+  # if we are working with the true data set that we built
+  else{
+    index0 <- sample(1:n0,n0,replace=TRUE)
+    index1 <- sample(1:n1,n1,replace=TRUE)+n0
+  }
+  
+  samp0 <- df[index0,1:k]    # sample from the first class
+  samp1 <- df[index1,1:k]   # sample from the second class
+  # predict the outputs on the two test samples
+  pred0 <- predict(log.model, newdata=samp0, type='response')
+  pred1 <- predict(log.model, newdata=samp1, type='response')
+  
+  # evaluate the p-value of the Mann-Whitney test
+  p.val <- wilcox.test(pred0, pred1)$p.value
+  
+  # evaluate the prob of H1 under the alternative hypothesis
+  rej <- (p.val < alpha) # useful for the POwer!
+  return(rej)
+}
+
+
+
+compute_power <- function(m,no,n1,alpha,df, N, sim){
+  # train the model on all over the data
+  log.model <- glm(target ~ ., data = df, family = 'binomial')
+  # replicate the Friedman's process M times pursuing a permutation test
+  result <- replicate(m,friedman(n0,n1,alpha,df,log.model, N, sim))
+  # compute the power with a Montecarlo method
+  Power <- sum(result)/m
+  return(Power)
+}
+
+# building the dataframe -------------------------------------
+k <- 9 # number of independent components
+ICA_asd <- lapply(asd_data,ICA_create,k)
+df_asd = create_dataframe(ICA_asd)
+df_asd$target <- rep(1,length(asd_data))
+
+ICA_td <- lapply(td_data,ICA_create,k)
+df_td = create_dataframe(ICA_td)
+df_td$target <- rep(0,length(td_data))
+
+# concatenate the two dataframes
+df <-  concat.data(df_td, df_asd)
+
+```
+
+# Simulations setup
+
+Our goals in the simulation phase are two :
+
+1. to find a family of distributions that is related to the data set we created;
+2. to find the parameters that minimize the distance between two chosen distributions from the same family.
+
+We then visualize, with a histogram, the approximate distribution of a sample of different features.\
+We note that, as expected, the features inherent in the mean have an asymptotically Normal distribution, the variance is asymptotically a Chi-square, and the autocorrelation would appear to be a Beta.
+```{r, out.width="100%", out.height="700px",echo=FALSE}
+feature.samp <- sample(1:k, 3)
+par(mfrow=c(3,3))
+for( i in 1:3){
+  x <- df[,feature.samp[i]]
+  params <- fitdistr(x, "normal")$estimate
+  hist(x,breaks=50,
+       main=paste(feature.samp[i],'-th column of the dataframe'), col="aquamarine", border="white",
+       xlab='values',prob=TRUE)
+  curve(dnorm(x, params[1], params[2]), add=T, col="lightblue", lwd=3)
+  
+}
+
+feature.samp <- sample((k+1):(2*k), 3)
+for( i in 1:3){
+  x <- df[,feature.samp[i]]
+  #params <- fitdistr(x, "chi-squared")$estimate
+  hist(x,breaks=50,
+       main=paste(feature.samp[i],'-th column of the
+                  dataframe'), col="orange",  border="white",
+       xlab='values',prob=TRUE)
+   #curve(dchisq(x, params), add=T, col="chocolate", lwd=3)
+}
+
+feature.samp <- sample((2*k+1):(3*k), 3)
+for( i in 1:3){
+  x <- df[,feature.samp[i]]
+  starter= list('shape1'=0.5,'shape2'=0.5)
+  par1 <- fitdistr(x, "beta", starter)$estimate[1]
+  par2 <- fitdistr(x, "beta", starter)$estimate[2]
+  hist(x,breaks=50,
+       main=paste(feature.samp[i],'-th column of the
+                  dataframe'),
+       col="pink",  border="white",
+       xlab='values',prob=TRUE)
+  curve(dbeta(x, par1, par2), add=T, col="chocolate", lwd=3)
+}
+```
+Therefore, considering the normal trend of averages, we decide to use a multivariate normal to simulate Friedman's process as per the request in exercise three
+
+#### **Minimizing the Kullback-Liebler distance**
+
+Having chosen the family of distributions, we have only to select two specific distributions by defining their parameters.
+For the first distribution $F_1$ we simply fit a multivariate normal to our data set with the MLE.\
+Then we might wonder how minimizing the **K-L divergence** between $F_1$ (which is already selected) and $F_2$, whose parametaers are still unknown.
+But there is an important relationship that allows a good approximation of the minimum distance between these two distributions: minimizing the K-L divergence is equivalent to minimizing the *negative log-likelihood*, which is equivalent to **maximizing the likelihood** between the empirical data sampled from $F_1$ (which is assumed as well defined) and the multivariate distribution $F_2$.\
+Summing up we find the parameters of the second distribution by maximum likelihood estimation of the parameters of $F_2$ evaluated in a sample from $F_1$.
+
+```{r, include=FALSE}
+# finding the distributions that minimize the Kullback-Lieb. distance
+# first distro
+set.seed(755)
+first.fit <- mvnorm.mle(as.matrix(df[,1:k]))
+mu1 <- first.fit$mu
+sigma1 <- first.fit$sigma
+
+# second ditro
+obs1 <- mvrnorm(n = 500, mu1, sigma1)
+second.fit <- mvnorm.mle(obs1)
+mu2 <- second.fit$mu
+mu2[3] <- 9e-18 # to solve the fact that the 2 distro are too similar
+sigma2 <- second.fit$sigma
+
+
+# building the simulation dataframe
+data1 <- sim.data(mu1, sigma1, 1)
+data2 <- sim.data(mu2, sigma2, 0)
+norm.df <- concat.data(data1, data2)
+```
+
+# Simulated Friedman's process
+
+We now proceed to simulate the **Friedman's process** on our simulation data set and analyze the **power** (and the **size**) of our test on the accuracy of the classifier in identifying the classes of the subjects in question.\
+With the plot below we note that as the hyperparameter M varies, i.e., the number of permutations performed/simulation size, the test is always valid , but power increases with increasing M, reaching a diminishing return for M >> N (where N is the sample cardinality).\
+Note that in these early case studies we use sizes for the two distributions at each iteration we use samples of size $n_0$ $n_1$ equal to that which we will later have available in the non-simulated case below in the homework.
+
+```{r, out.width="80%", out.height="500px", fig.align="center",echo=FALSE}
+# evaluate the power with different hyperparameteres
+m <- c(10,100,200,500,1000,2000,3000,5000) # sim size
+n0  = length(td_data) # number of row F0
+n1 = length(asd_data) # number of row F1
+alpha <- 0.05  # p-value
+sim = TRUE
+N <- 500
+stats_test <- lapply(m, compute_power, n0, n1,
+                     alpha, norm.df, N, sim)
+plot(m,stats_test,type='l',ylab='Power', lwd=2,
+     xlab='Simulation Size', col="dodgerblue4")
+```
+
+Instead, below we study the variation of power as the characteristics of the test set on which we perform label prediction change. We try with a data set unbalanced toward one class and then toward the other, one instead with few examples on which to permute, and the last with many examples.\
+We deduce from the plots that for unbalanced datasets the performance does not necessarily regress but obviously the number of samples on which we then perform the permutation affects the value of the power.
+
+```{r, fig.align="center",echo=FALSE}
+ # now we try to evaluate the power changing the relationship between n0 and n1
+ # i.e. the samples cardinality from the two different distributions at each iteration
+
+m <- c(10,100,200,500,1000,2000,3000,5000) #sim size
+n0 <- c(260, 30, 5,300) #number of row F0
+n1 <- c(30, 260, 5,300)  #number of row F1
+alpha <- 0.05  #p-value
+sim = TRUE
+N <- 500
+n0 <- c(260, 30, 5,300)
+n1 <- c(30, 260, 5,300)
+par(mfrow=c(2,2))
+for(i in 1:4){
+
+  size0 <- n0[i]
+  size1 <- n1[i]
+
+  stats_test <- lapply(m, compute_power, size0, size1,
+                       alpha, norm.df, N, sim)
+  plot(m,stats_test,type='l',ylab='Power',
+       xlab='Simulation Size', col="cornflowerblue",
+       sub=paste("N0 =",size0,"N1 =",size1))
+}
+
+```
+
+
+# Testing the classification accuracy on our data
+
+At the end of our study we can say with some significance that the activation states of the brains of interest belong to two different classes of subjects (having found diversity in their distributions).\
+In fact, we conclude with a plot of the power of the test on the accuracy of the classifier in distinguishing the two membership classes likely to what we performed in the simulation phase.
+```{r, fig.align="center",echo=FALSE}
+m <- c(10,100,200,500,1000,2000,3000,5000) #sim size
+n0  = length(td_data) #number of rows fromt TD
+n1 = length(asd_data) #number of rows from ASD
+alpha <- 0.05  #p-value
+sim <- FALSE
+N <- 0
+stats_test <- lapply(m,compute_power,n0,n1,alpha,df,N,sim)
+
+plot(m ,stats_test,type='l',ylab='Power', col="darkorchid4",
+     xlab='Number of permutations', lwd=2)
+```
+
+#### **The number of independent components**
+
+We add a brief justification for the choice of the number $k$ of independent components, on which the size of the final data set will then depend: we identified the smallest number $k$ for which we were able to achieve acceptable perfomance in the test. Below are some tests performed.
+```{r, out.width="100%", fig.align="center",echo=FALSE}
+m <- c(200,500,1000,2000,3000) #sim size
+n0  = length(td_data) #number of rows fromt TD
+n1 = length(asd_data) #number of rows from ASD
+alpha <- 0.05  #p-value
+sim <- FALSE
+N <- 0
+par(mfrow=c(1,3))
+# testing with different indep. components
+ic <- c(3,6,12)
+for(i in 1:3){
+  k <- ic[i]
+  ICA_asd <- lapply(asd_data,ICA_create,k)
+  df_asd = create_dataframe(ICA_asd)
+  df_asd$target <- rep(1,length(asd_data))
+  
+  ICA_td <- lapply(td_data,ICA_create,k)
+  df_td = create_dataframe(ICA_td)
+  df_td$target <- rep(0,length(td_data))
+  
+  df <-  concat.data(df_td, df_asd)
+  
+  stats_test <- lapply(m,compute_power,n0,n1,alpha,df,N,sim)
+  plot(m,stats_test,type='l',ylab='Power',
+       xlab='Number of permutations', col="darkorchid4",
+       sub=paste("Number of Indep. Compoentes:",k))
+
+}
+```
+

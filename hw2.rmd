@@ -1,0 +1,419 @@
+
+---
+title: "`Homework 2`"
+author: "Enrico Grimaldi, Angelo Mandara, Tito Tamburini"
+date: "06. January 2023"
+---
+
+
+```{r , include=FALSE}
+load("hw2_data.RData")
+
+# used libraries
+library(ppcor)
+library(igraph)
+```
+
+
+
+```{r}
+# set the coverage
+alpha <- 0.05
+```
+
+
+## Implemented R Functions
+
+These are the R functions we used to compute the graphs estimate.\
+
+#### <span style="color: chocolate;">*Fisher_Z(matr)*</span> :\
+**INPUT**: a correlation matrix.\
+**OUTPUT**: the Fisher-Z transform of the correlation matrix.\
+
+```{r}
+Fisher_Z <- function(matr){
+  
+  # dimension of the quadratic matrix
+  n <- length(matr[1,])
+  
+  fisher_matr <- unlist(lapply(matr[1,], atanh))
+  # building-up the new matrix with the transformed correlations
+  for(i in 2:n){
+    # evaluate the fisher z-transform for each correlation of the
+    # i-th row of the corr. matrix
+    new_row <- unlist(lapply(matr[i,], atanh))
+    # add the result above as a new row to the new matrix
+    fisher_matr <- rbind(fisher_matr, new_row)
+  }
+  return(fisher_matr)
+}
+```
+
+
+
+#### <span style="color: chocolate;">*create_adjacency_matrix(matr,percentile_t,se,alpha,m)*</span> :\
+**INPUT** :\
+  * *matr* -> the Fisher-Z transfor of the correlation matrix;\
+  * *se* -> the standard error of the Fisher-Z transfor of the correlation matrix;\
+  * *alpha* -> the value of the confidence level (1 - *alpha*);\
+  * *m* -> coefficient of the Bonferroni correction;\
+**OUTPUT**:\
+  * the adjacency matrix.\
+
+```{r}
+create_adjacency_matrix <- function(matr,percentile_t,se,alpha,m){
+  tri_matr <- matr[lower.tri(matr)]
+  t_matr <- quantile(tri_matr,percentile_t)[[1]] #Compute threshold
+  matr  <- apply(matr ,c(1,2),clean_infinite)
+  upper_matr <- upper(matr,se,alpha,m) #Function 3
+  lower_matr <- lower(matr,se,alpha,m)#Function 3
+  adj_matrix <- ((-upper_matr > t_matr) | (lower_matr > t_matr)) #Compute adjacency matrix
+  return(adj_matrix)
+}
+```
+
+
+#### <span style="color: chocolate;">*upper/lower(matr,se,alpha,m)*</span> :\
+**INPUT** :\
+  * *matr* -> the Fisher-Z transform of the correlation matrix;\
+  * *se* -> the standard error of the Fisher-Z transform of the correlation matrix;\
+  * *alpha* -> the value of the confidence level (1 - *alpha*);\
+  * *m* -> coefficient of the Bonferroni correction;\
+**OUPUT**: the upper/lower bound matrix.
+
+```{r}
+upper <- function(matr,se,alpha,m){
+  upper_matr <- (matr+qnorm(1-alpha/(2*m))*se)
+  return(upper_matr)
+}
+
+lower <- function(matr,se,alpha,m){
+  lower_matr <- (matr-qnorm(1-alpha/(2*m))*se)
+  return(lower_matr)
+}
+
+```
+
+
+
+#### <span style="color: chocolate;">*graph_estimate(td_sel,asd_sel,is_partial=FALSE,Bonf=TRUE,alpha,percentile_t)*</span> :\
+**INPUT**:\
+* *td_sel,asd_sel* -> the ASD and TD dataframes;\
+* *is_partial* -> a flag, if TRUE to use the partial correlation to estimate the graphs, default is FALSE;\
+* *Bonf* -> a flag, if TRUE uses the Bonferroni's correction to compute the confidence intervals to estimate the graphs;\
+* *alpha* -> the value of the confidence level (1 - *alpha*);\
+* *percentile_t* -> the percentile of the correlation matrix we will use to set the threshold *t*;\
+**OUTPUT**: 3 adjacency matrices that represents the 3 graphs we need to plot:\
+* the one for the ASD dataframe;\
+* the one for the TD dataframe;\
+* the one made from the absolute value of the difference between the two correlation matrices of both dataframes.\
+
+
+```{r}
+graph_estimate <- function(td_sel,asd_sel,is_partial=FALSE,Bonf=TRUE,alpha,percentile_t){
+  # Bind all the rows of all the dataframes of the same type(ASD or TD)
+  df_asd <- asd_sel[[1]]
+  df_td <- td_sel[[1]]
+  D <- length(df_asd) #Number of columns (ROI)
+  
+  for(i in 2:length(asd_sel)){
+    df_asd <- rbind(df_asd,asd_sel[[i]])
+  }
+  for(i in 2:length(td_sel)){
+    df_td <- rbind(df_td,td_sel[[i]])
+  }
+  #Change columns names
+  df_asd <- setNames(df_asd, seq(1,116))
+  df_td <- setNames(df_td, seq(1,116)) 
+  N <- length(df_asd[[1]]) #Number of rows 
+  if(!is_partial){
+    corr_asd <- cor(df_asd)
+    corr_td <- cor(df_td)
+    se <- 1/((N-3)^(1/2))
+  }
+  else{
+    corr_asd <- pcor(df_asd)$estimate
+    corr_td <- pcor(df_td)$estimate
+    se <- 1/(N-D+1)
+  }
+
+  z_corr_asd <- Fisher_Z(corr_asd)# function 1
+  z_corr_td <- Fisher_Z(corr_td)# function 1
+  
+  if(Bonf){
+    m = choose(D,2)
+  }
+  else{
+    m = 1
+  }
+  
+  adj_asd <- create_adjacency_matrix(z_corr_asd,percentile_t,se,alpha,m)*1# function 2
+  
+  adj_td <- create_adjacency_matrix(z_corr_td,percentile_t,se,alpha,m)*1# function 2
+  
+  diff_matr <- abs(z_corr_asd-z_corr_td) # Compute the difference matrix
+  adj_diff <- create_adjacency_matrix(diff_matr,percentile_t,se,alpha,m)*1 ## function 2
+  
+  return(list(adj_asd,adj_td,adj_diff))
+}
+
+#Function to remove Inf values from the a matrix using lapply
+clean_infinite <- function(x) replace(x,is.infinite(x),NaN)
+
+```
+
+## Choose right threshold
+
+```{r,include=FALSE}
+knitr::opts_chunk$set(fig.width=8,fig.height = 5)
+```
+
+```{r,include=FALSE}
+# evaluate the density of the estimated graph given different threshold values
+threshold_vec  = seq(.00,.99,.01)
+t_vec  = seq(.9,.99,.01)
+density = rep(NA,length(threshold_vec))
+l_n = rep(NA,length(t_vec))
+l_e = rep(NA,length(t_vec))
+for( i in 1:length(threshold_vec)){
+  p <- threshold_vec[i]
+  l <- graph_estimate(td_sel,asd_sel,F,T,alpha,p)
+  adj <- l[[3]]
+  g <- graph_from_adjacency_matrix(adj,"undirected")
+  density[i]  <- edge_density(g)
+}
+
+# evaluate the number of edges (and the related nodes) in the difference graphs for different thresholds
+for( j in 1:length(t_vec)){
+  p <- t_vec[j]
+  l <- graph_estimate(td_sel,asd_sel,F,T,alpha,p)
+  adj <- l[[3]]
+  g <- graph_from_adjacency_matrix(adj,"undirected")
+  l_n[j]  <- length(unique(match(as.list(get.edgelist(g)),V(g)$name)))
+  l_e[j]  <- length(E(g))
+}
+```
+
+From a series of studies that we report, we conclude that the threshold should be chosen rather high in terms of quantile of difference between correlations. In fact, areas of the brain from person to person interact differently in dependence of a myriad of factors. Sebastian Seung in his writings and during a [2010 TED talk](https://youtu.be/HA7GwKXfJB0) talks about how complex the study of human **connectomics** can be. The number of relationships between areas of the human brain is about six orders of magnitude greater than that of a worm, and these connections change due to a number of factors external and internal to the individual (not to mention the obvious influence of observation time). For example, the aforementioned professor from the Princeton Neuroscience Institute and Department of Computer Science (as well as President of Samsung Electronics) even states that experiences and memories can change our connectome and its structure!
+The thesis is then reinforced by a series of [articles](https://www.theatlantic.com/health/archive/2012/03/the-connectome-a-new-way-to-think-about-what-makes-you-you/255023/) that essentially point out that a person can be completely represented by one's own by one's connectome. It is also indicator of the context that have formed the subject himself and his personality.
+
+Let us stop the discussion here before we get into the ontological definition of identity...
+From the reasoning above then follows our choice of threshold for identifying relevant changes in the relationships between regions of interest (ROIs) in healthy and autistic subjects. 
+We then decide to classify only particularly striking differences as significant because we want to filter out all interdependence variations related to the simple uniqueness of the individual. Note that it would be almost impossible to discern the areas affected by the form of autism if we did not "clean" the difference graph of all edges related to even minimal correlation gradients (speaking of overfitting would be an understatement).
+
+We therefore choose to carry out an analysis of both qualitative and quantitative characteristics of the graph as the threshold varies.\
+The study is concerned with two factors we consider important:\
+1. the density trend of the graph, i.e., D = # of edges/ max possible numb of edges\
+2. the specific nerve areas affected by the various threshold levels set.\
+
+The density of the graph is somewhat indicative of how many "false positives" we intercept. These are particularly critical compared to false negatives (which essentially should only appear for very high threshold values).
+
+The density trend is a hyperbola, and we particularly focus on threshold values in the range 0.90-0.99, where the number of edges descends with **linear speed**.
+
+```{r}
+# plot how the density of the graph varies as the threshold varies
+plot(threshold_vec,density,type='l',lwd = 4,col='blueviolet',xlab = "Threshold",
+     ylab="Graph density",cex.main = 1.5,cex.lab=1.5,cex.axis=1.5)
+# add a line representing our actual threshold
+abline(v=.96,col='blue')
+```
+
+We then identify the ROIs affected in the different levels of t in the interval we focus on: we note that going down from 0.97 to 0.99 the number of nodes (ROIs) highlighted descends while it stabilizes in the 0.96-0.95 section, where the regions manifesting different interrelationships are the SAME (the nodes affected do not change) but only the amount of correlations considered (the degree of the nodes themselves) increases.
+
+```{r}
+# plot the number of ROIs
+par(mfrow=c(1,2))
+plot(t_vec,l_n,type='l',lwd = 4,col='aquamarine',xlab = "Threshold",ylab="ROIs with relevant activation",cex.main = 1.5,cex.lab=1.5,cex.axis=1.5)
+abline(v=.96,col='blue')
+# plot the number of edges (relevant correlations)
+plot(t_vec,l_e,type='l',lwd = 4,col='chocolate',xlab = "Threshold",ylab="Graph edges number",cex.main = 1.5,cex.lab=1.5,cex.axis=1.5)
+abline(v=.96,col='blue')
+```
+
+
+
+## Create graphs from adjacency matrix using igraph
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(fig.width = 40, fig.height = 40)
+```
+
+
+### Compute the adjacency matrix for each graph we need to estimate
+```{r}
+# evaluate the graphs using the above functions
+list_matrices <- graph_estimate(td_sel,asd_sel,F,T,alpha,.96)
+adj_asd <- list_matrices[[1]]
+adj_td <- list_matrices[[2]]
+adj_diff <- list_matrices[[3]]
+```
+### Create three graphs
+```{r}
+# create graphs
+g_td <- graph_from_adjacency_matrix(adj_td,"undirected")
+g_asd <- graph_from_adjacency_matrix(adj_asd,"undirected")
+g_diff <- graph_from_adjacency_matrix(adj_diff,"undirected")
+# graph layout
+layout_asd <- layout_(g_asd, on_grid())
+layout_td <- layout_(g_td, on_grid())
+layout_diff <- layout_(g_diff, on_grid())
+```
+
+### Plots
+
+```{r}
+#Plot asd graph
+
+plot.igraph(g_asd,
+            edge.width = 4,
+            vertex.size=10,
+            vertex.label.cex=3.5,
+            vertex.label.color = 'black',
+            vertex.color = ifelse(degree(g_asd,V(g_asd))>mean(degree(g_asd,V(g_asd))),"lightblue", "blue" ),
+            layout = layout_asd)
+title("Graph created from ASD subjects",cex.main=6,col.main="blue")
+```
+
+```{r}
+#Plot td graph
+plot.igraph(g_td,
+            edge.width = 4,
+            vertex.size=10,
+            vertex.label.cex=3.5,
+            vertex.label.color = 'black',
+            vertex.color = ifelse(degree(g_td,V(g_td)) > mean(degree(g_td,V(g_td))),"pink", "red" ),
+            layout = layout_td)
+title("Graph created from TD subjects",cex.main=6,col.main="red")
+```
+
+```{r}
+#Plot difference graph
+plot.igraph(g_diff,
+            edge.width = 4,
+            vertex.size=10,
+            vertex.label.cex=3.5,
+            vertex.label.color = 'black',
+            vertex.color = ifelse(degree(g_diff,V(g_diff)) > mean(degree(g_diff,V(g_diff))),"yellow", "orange" ),
+            layout = layout_diff)
+title("Graph of the difference corr. matrix",cex.main=6,col.main="orange")
+```
+
+## Obtained results and conclusions
+In the second part of our analysis we point out that the problem as reported is yes classification (supervised learning), but we do not possess the true labels of the brain areas involved, that is, we do not know in advance which edges we report correctly or not. We then decide to compare our results with those reported by other studies and try to analyze how far we potentially deviate from the scientific literature of interest.
+
+To perform this verification we plotted the graphs by numbering the nodes according to consistently with the table below. \
+<span style="color: red;">The following are the interested brain areas that change their activity when comparing healthy people with ASD people</span>
+
+
+```{r}
+df_vertex_from_edges <- get.edgelist(g_diff)        #to have the name of the vertex in the edges of g_diff 
+#as.list(df_vertex_from_edges)                       #convert the dataframe in a list to use match
+#match will return the position of an element in a list
+#match(c(1,2),c(1,3,2))
+unique(match(as.list(df_vertex_from_edges),V(g_diff)$name))
+```
+
+
+```{r out.width="500px"}
+img <- "116-brain-regions-defined-by-AAL-The-regions-highlighted-are-those-used-in-our.png"
+knitr::include_graphics(img)
+
+```
+
+## Brain areas
+If you consult the table above you can note that our results all involve areas of the brain that other studies confirm possess different activation states in unhealthy subjects. \
+
+Articles about the areas actually affected in individuals with autism: \
+* [Cerebellum ](https://pubmed.ncbi.nlm.nih.gov/24904314/) \
+* [Thalamus, Striatum, and Pallidum](https://pubmed.ncbi.nlm.nih.gov/27125303/) \
+* [Hippocampus and the arleady mentioned areas](https://www.spectrumnews.org/news/brain-structure-changes-in-autism-explained/) \
+
+![](https://spectrumnews-web-assets.s3.amazonaws.com/wp-content/uploads/2020/10/14160422/Structural-Brain-differences-Explainer-01.gif "brain")
+
+
+## Bonferroni correction effect
+
+Bonferroni correction is meant to drastically decrease the first kind error in our classification problem i.e. we avoid as much as possible to reject something when it is actually true. In fact, when we plot the difference graph with reference to uncorrected (and thus larger) confidence intervals, the number of edges increases exponentially and we lose precision and accuracy. In the case where we consider Pearson correlation for the construction of the graph there is no way to avoid Bonferroni correction.
+```{r, include=F}
+list_matrices <- graph_estimate(td_sel,asd_sel,F,F,alpha,.96)
+adj_diff <- list_matrices[[3]]
+g_diff <- graph_from_adjacency_matrix(adj_diff,"undirected")
+#Graph layout
+layout_diff <- layout_(g_diff, on_grid())
+```
+
+```{r}
+#Plot difference graph
+plot.igraph(g_diff,
+            edge.width = 4,
+            vertex.size=10,
+            vertex.label.cex=3.5,
+            vertex.label.color = 'black',
+            vertex.color = ifelse(degree(g_diff,V(g_diff)) > mean(degree(g_diff,V(g_diff))),"yellow", "orange" ),
+            layout = layout_diff)
+title("Graph without Bonferroni correction",cex.main=6,col.main="orange")
+```
+
+
+## Last one to die
+In summary, we found that the correlations between the various areas of the brain are not at all easy to assess. In fact, in reality there is always a perceived difference in how the various areas activate and communicate with each other. This difference in most cases is far from minimal, the only exception seems to be the case of [experiments on monozygotic twins](https://ieeexplore.ieee.org/abstract/document/8759407?casa_token=njGuFtTv4L4AAAAA:hrn9L9P1Xaey3mSYgdjCWdkgslX5wUW5bAg-u7tFjK1bum-KfJTLgxjNKxjFTKllvug3V3nq). Therefore, to take the last areas of the brain to show a connection, one must raise to threshold to a very high value (0.9997).
+The reported areas are the "most resilient".
+```{r}
+list_matrices <- graph_estimate(td_sel,asd_sel,F,T,alpha,.9997)
+adj_diff <- list_matrices[[3]]
+g_diff <- graph_from_adjacency_matrix(adj_diff,"undirected")
+df_vertex_from_edges <- get.edgelist(g_diff)
+unique(match(as.list(df_vertex_from_edges),V(g_diff)$name))
+```
+
+
+## Graph estimate using the partial correlation
+
+The study of partial correlation is strictly related to the concept of **confounding variables**: variables that we observe to adjust our results, using the so called **passive conditioning**. In this case each time, to evaluate the partial correlation between two ROIs we consider all the other areas as confounding variables and we condition our correlation study on the latter. What we obtain is a pretty dense graph, this is due to the fact that mostly our partial correlation is stronger than simple Pearson correlation and, compared to the previous case, Bonferroni correction does not allow room for improvement either. 
+```{r, include=F}
+# with partial corr and Bonf correction
+list_matrices1 <- graph_estimate(td_sel,asd_sel,T,T,alpha,.96)
+adj_diff1 <- list_matrices1[[3]]
+g_diff1 <- graph_from_adjacency_matrix(adj_diff1,"undirected")
+layout_diff1 <- layout_(g_diff1, on_grid())
+
+# without Bonf correction
+list_matrices2 <- graph_estimate(td_sel,asd_sel,T,F,alpha,.96)
+adj_diff2 <- list_matrices2[[3]]
+g_diff2 <- graph_from_adjacency_matrix(adj_diff2,"undirected")
+#Graph layout
+layout_diff2 <- layout_(g_diff2, on_grid())
+```
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(fig.width = 30, fig.height = 20)
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+#Plot difference graph
+plot.igraph(g_diff1,
+            edge.width = 4,
+            vertex.size=10,
+            vertex.label.cex=3.5,
+            vertex.label.color = 'black',
+            vertex.color = ifelse(degree(g_diff,V(g_diff)) > mean(degree(g_diff,V(g_diff))),"yellow", "orange" ),
+            layout = layout_diff1)
+title("Graph of the difference partial corr. matrix ",cex.main=3,col.main="orange")
+
+plot.igraph(g_diff2,
+            edge.width = 4,
+            vertex.size=10,
+            vertex.label.cex=3.5,
+            vertex.label.color = 'black',
+            vertex.color = ifelse(degree(g_diff,V(g_diff)) > mean(degree(g_diff,V(g_diff))),"orange", "red" ),
+            layout = layout_diff2)
+title("Graph without Bonferroni correction",cex.main=3,col.main="red")
+```
+
+Although the analysis as a whole is more complex because it is more difficult to clean the graph from the noise of brain activities of no real interest, the degree of critical nodes rises exponentially in our representations and we can more easily identify the areas actually affected by autism spectrum disorder (note the differently colored nodes in the plots).
+
+
+
+
